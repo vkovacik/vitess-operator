@@ -9,6 +9,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"vitess.io/vitess/go/vt/topo/topoproto"
 
+	"github.com/sirupsen/logrus"
+
 	planetscalev2 "planetscale.dev/vitess-operator/pkg/apis/planetscale/v2"
 	"planetscale.dev/vitess-operator/pkg/operator/results"
 	"planetscale.dev/vitess-operator/pkg/operator/rollout"
@@ -22,6 +24,13 @@ func (r *ReconcileVitessShard) reconcileRollout(ctx context.Context, vts *planet
 		// If the shard is not scheduled for a cascading update, silently bail out and do nothing.
 		return resultBuilder.Result()
 	}
+
+	log := log.WithFields(logrus.Fields{
+		"database": vts.Spec.DatabaseName,
+		"shard":    vts.Spec.Name,
+		"function": "reconcileRollout",
+	})
+	log.Info("vkovacik: starting reconcileRollout")
 
 	tabletPods, err := r.tabletPodsFromShard(ctx, vts)
 	if err != nil {
@@ -53,6 +62,7 @@ func (r *ReconcileVitessShard) reconcileRollout(ctx context.Context, vts *planet
 
 	// Retrieve tablet pod to be released during this reconcile.
 	tabletKey, pod := getNextScheduledTablet(tabletKeys, tabletPods)
+	log.Infof("vkovacik: tablet %v is next to be reconciled", tabletKey)
 	if tabletKey == "" {
 		// If we have no more scheduled tablets, uncascade the shard.
 		if err := r.uncascadeShard(ctx, vts); err != nil {
@@ -74,10 +84,12 @@ func (r *ReconcileVitessShard) reconcileRollout(ctx context.Context, vts *planet
 		deletePod = true
 	}
 
+	log.Infof("vkovacik: tablet %v starting reconciling", tabletKey)
 	if err := r.releaseTabletPod(ctx, pod, deletePod); err != nil {
 		r.recorder.Eventf(vts, corev1.EventTypeWarning, "RollingRestartBlocked", "release of Pod %v (tablet %v) failed: %v", pod.Name, tabletKey, err)
 		resultBuilder.Error(err)
 	}
+	log.Infof("vkovacik: tablet %v finished reconciling", tabletKey)
 
 	return resultBuilder.Result()
 }
